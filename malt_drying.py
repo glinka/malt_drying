@@ -11,16 +11,24 @@ def const_inflow(t):
     Wa_in = 0.008
     return [Ta_in, Wa_in]
     
+def lopez_program(t):
+    hours_elapsed = t/float(3600)
+    if hours_elapsed < 16:
+        return [60, 0.008]
+    elif hours_elapsed > 16 and hours_elapsed < 24:
+        return [65, 0.008]
+    else:
+        return [80, 0.008]
 
 def dry_malt(dt, tfinal, dz, z, air_program):
     # barley density, kg/m^3
     rho_barley = 600.0
-    # dry barley heat capacity, J/(kg K)
-    Cp_barley = 1300
-    # specific heat of water vapor  J/(kg K)
-    Cp_watervapor = 1870
-    # specific heat of water  J/(kg K)
-    Cp_water = 4180
+    # dry barley heat capacity, kJ/(kg K)
+    Cp_barley = 1.300
+    # specific heat of water vapor kJ/(kg K)
+    Cp_watervapor = 1.870
+    # specific heat of water  kJ/(kg K)
+    Cp_water = 4.180
     G = 310/3600.0
     
     nzs = int(z/dz)
@@ -121,11 +129,12 @@ def dry_malt(dt, tfinal, dz, z, air_program):
     c = ['r', 'b', 'k', 'g', 'c', 'm', 'y']
     zspacing = int(nzs/n_zslices)
     for i in range(n_zslices):
-        ax.scatter(np.arange(nts+1)*dt/3600.0, Tgs[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=0)
-    ax.scatter(np.arange(nts+1)*dt/3600.0, Tgs[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=0)
+        ax.plot(np.arange(nts+1)*dt/3600.0, Tgs[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=1)
+    ax.plot(np.arange(nts+1)*dt/3600.0, Tgs[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=1)
     ax.set_xlabel('Time (h)')
     ax.set_ylabel('Grain temperature (' + r'$\degree$' + 'C)')
-    ax.legend()
+    ax.set_xlim(left=0)
+    ax.legend(loc=4)
     plt.show()
 
     fig = plt.figure()
@@ -133,11 +142,12 @@ def dry_malt(dt, tfinal, dz, z, air_program):
     ax.hold(True)
     n_zslices = 5
     for i in range(n_zslices):
-        ax.scatter(np.arange(nts)*dt/3600.0, Tas[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=0)
-    ax.scatter(np.arange(nts)*dt/3600.0, Tas[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=0)
+        ax.plot(np.arange(nts)*dt/3600.0, Tas[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=1)
+    ax.plot(np.arange(nts)*dt/3600.0, Tas[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=1)
     ax.set_xlabel('Time (h)')
     ax.set_ylabel('Air temperature (' + r'$\degree$' + 'C)')
-    ax.legend()
+    ax.set_xlim(left=0)
+    ax.legend(loc=4)
     plt.show()
 
     fig = plt.figure()
@@ -145,11 +155,12 @@ def dry_malt(dt, tfinal, dz, z, air_program):
     ax.hold(True)
     n_zslices = 5
     for i in range(n_zslices):
-        ax.scatter(np.arange(nts)*dt/3600.0, Was[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=0)
-    ax.scatter(np.arange(nts)*dt/3600.0, Was[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=0)
+        ax.plot(np.arange(nts)*dt/3600.0, Was[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=1)
+    ax.plot(np.arange(nts)*dt/3600.0, Was[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=1)
     ax.set_xlabel('Time (h)')
     ax.set_ylabel('Air moisture content (kg water/kg dry air)')
-    ax.legend()
+    ax.set_xlim(left=0)
+    ax.legend(loc=1)
     plt.show()
 
     fig = plt.figure()
@@ -157,11 +168,12 @@ def dry_malt(dt, tfinal, dz, z, air_program):
     ax.hold(True)
     n_zslices = 5
     for i in range(n_zslices):
-        ax.scatter(np.arange(nts+1)*dt/3600.0, Ms[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=0)
-    ax.scatter(np.arange(nts+1)*dt/3600.0, Ms[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=0)
+        ax.plot(np.arange(nts+1)*dt/3600.0, Ms[zspacing*i, :], label="depth: " + str(zspacing*i*dz) + " m", c=c[i], lw=1)
+    ax.plot(np.arange(nts+1)*dt/3600.0, Ms[-1, :], label="depth: " + str(zspacing*n_zslices*dz) + " m", c=c[n_zslices], lw=1)
     ax.set_xlabel('Time (h)')
     ax.set_ylabel('Grain moisture content (kg water/kg dry air)')
-    ax.legend()
+    ax.set_xlim(left=0)
+    ax.legend(loc=1)
     plt.show()
 
 
@@ -185,38 +197,55 @@ def Ta_next(Tg, dTg, rho, h, dt, dM, Cp_grain, Cp_water, M, Cp_watervapor, Ta):
     return ((Tg+dTg)*(D*(Cp_grain + (M+dM)*Cp_water) + 1) - D*Tg*(Cp_grain + M*Cp_water) - D*dM*Lv - Ta)/(1 + 1820*D*dM)
 
 def deltaTg(Wa, dWa, dM, Ta, Cp_grain, M, Cp_water, Cp_watervapor, dz, rho, G, dt, h, Tg, rho_grain):
-    hcv = 49.32*1000*np.power(G, 0.6906)
-    # specific heat of dry grain (kJ/kg K) from thesis
-    Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
+    # enthalpy of vaporization of water (kJ/ kg) (assumed constant, taken at 25 C)
+    L_water = 1000*43.99/18
+    # !!!!!!!!!!!!!!!!!!!!
+    #    UNITS of hcv??
+    # !!!!!!!!!!!!!!!!!!!!
+    # either J/s m^3 K or kJ/min m^3 K
+    # hcv = 49.32*1000*np.power(G, 0.6906)
+    hcv = 49.32*np.power(G, 0.6906)*60
+    # specific heat of malt (kJ/kg K) from thesis
+    L_malt = L_water*(1 + 0.5904*np.exp(-0.1367*M))
+    # Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
     Cp_grain = 1600
-    F = Cp_watervapor*Ta + Lv - Cp_water*Tg
+    F = Cp_watervapor*Ta + L_water - Cp_water*Tg
     A = 2*(Ta - Tg)
     B = Cp_grain + Cp_water*M
     # latent heat of grain (J/kg) from thesis
-    Lg = 1000*Lv*(1 + 0.5904*np.exp(-0.1367*M))
-    Y = Lg + Cp_watervapor*Ta - Cp_water*Tg
+    # Lg = 1000*Lv*(1 + 0.5904*np.exp(-0.1367*M))
+    Y = L_malt + Cp_watervapor*Ta - Cp_water*Tg
     Cp_air = 1006
     E = Cp_air + Cp_watervapor*(Wa - rho_grain*dz*dM/(G*dt))
-    F = Cp_watervapor*Ta + Lv - Cp_water*Tg
+    F = Cp_watervapor*Ta + L_water - Cp_water*Tg
     num = A + rho_grain*dM*(2*Y/hcv + dz*F/(G*E))/dt
     denom = 1 + rho_grain*(2*B/hcv + dz*(B + Cp_water*dM)/(G*E))/dt
     return num/denom
 
 def deltaTa(Tg, dTg, rho_grain, h, dt, dM, Cp_grain, Cp_water, M, Cp_watervapor, Ta, G, Wa):
-    hcv = 49.32*1000*np.power(G, 0.6906)
-    # specific heat of dry grain (kJ/kg K) from thesis
-    Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
+    # enthalpy of vaporization of water (kJ/ kg) (assumed constant, taken at 25 C)
+    L_water = 1000*43.99/18
+    # !!!!!!!!!!!!!!!!!!!!
+    #    UNITS of hcv??
+    # !!!!!!!!!!!!!!!!!!!!
+    # either J/s m^3 K or kJ/min m^3 K
+    # hcv = 49.32*1000*np.power(G, 0.6906)
+    hcv = 49.32*np.power(G, 0.6906)*60
+    # specific heat of malt (kJ/kg K) from thesis
+    L_malt = L_water*(1 + 0.5904*np.exp(-0.1367*M))
+    # Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
     Cp_grain = 1600
-    F = Cp_watervapor*Ta + Lv - Cp_water*Tg
+    F = Cp_watervapor*Ta + L_water - Cp_water*Tg
     A = 2*(Ta - Tg)
     B = Cp_grain + Cp_water*M
     # latent heat of grain (J/kg) from thesis
-    Lg = 1000*Lv*(1 + 0.5904*np.exp(-0.1367*M))
-    Y = Lg + Cp_watervapor*Ta - Cp_water*Tg
+    # Lg = 1000*Lv*(1 + 0.5904*np.exp(-0.1367*M))
+    Y = L_malt + Cp_watervapor*Ta - Cp_water*Tg
     Cp_air = 1006
     E = Cp_air + Cp_watervapor*(Wa - rho_grain*dz*dM/(G*dt))
-    F = Cp_watervapor*Ta + Lv - Cp_water*Tg
-    -rho_grain*dz*(dTg*(B + Cp_water*dM) - dM*F)/(G*E*dt)
+    F = Cp_watervapor*Ta + L_water - Cp_water*Tg
+    return -rho_grain*dz*(dTg*(B + Cp_water*dM) - dM*F)/(G*E*dt)
+
 
 def Ta_next_check(dz, rho, G, dt, h, Ta, Cp_watervapor, Wa, Tg, dTg, Cp_grain, M, dM, Cp_water, dWa):
     F = -dz*rho/(G*dt)
@@ -245,5 +274,5 @@ if __name__=="__main__":
     # change in time per iteration, s
     dt = 500
     # final time, s
-    tfinal = 60*60*10
-    dry_malt(dt, tfinal, dz, z, const_inflow)
+    tfinal = 60*60*30
+    dry_malt(dt, tfinal, dz, z, lopez_program)
