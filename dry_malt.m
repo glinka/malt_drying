@@ -16,80 +16,102 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   Cp_watervapor = 1.870;
   % specific heat of water  kJ/(kg K)
   Cp_water = 4.180;
+  % air inflow rate, kg/(m^2 s)
   G = 310/3600.0;
   
+  % number of numerical slices, m
   nzs = z/dz;
+  % number of timesteps, s
   nts = tfinal/dt;
+  % final time, s
   tfinal = nts*dt;
-
-  Tgs = zeros(nzs, nts+1);
+  
+  % set up arrays to save:
+  % malt temperatures, C
+  Tms = zeros(nzs, nts+1);
+  % malt moisture contents, kg water/kg dry matter
   Ms = zeros(nzs, nts+1);
+  % air temperatures, C
   Tas = zeros(nzs+1, nts);
+  % air moisture content, kg water/kg dry air
   Was = zeros(nzs+1, nts);
 
-  Tg_init = 20;
-  Tgs(:, 1) = Tg_init*ones(nzs,1);
+  % initial malt temperature, C
+  Tm_init = 20;
+  % setting intitial temperature throughout the bed
+  Tms(:, 1) = Tm_init*ones(nzs,1);
   
+  % initial malt moisture content, kg water/kg dry matter
   Ms_init = 0.8;
+  % setting intitial malt moisture content throughout the bed
   Ms(:, 1) = Ms_init*ones(nzs, 1);
 
   times = linspace(0, tfinal, nts+1);
 
-  CONDENSATION_TOL = 1e-5;
-  maxiter = 10000;
+  % numerical tolerance for the bisection method that is performed when simulating rewetting, and the maximum allowable iterations to achieve this precision
+  BISECTION_TOL = 1e-5;
+  BISECTION_MAXITER = 10000;
 
   % define smaller functions
 
   % saturated water vapor pressure, Pa
   Ps = @(Ta) 100000*exp(14.293  - 5291/(Ta + 273.15))/(3.2917 - 0.01527*(Ta + 273.15) + 2.54e-5*power(Ta + 273.15, 2));
   % relative humidity
-  RH = @(Pw,Ps) 100.0*Pw/Ps;
+  RH = @(Pw,Ps) Pw/Ps;
   % drying rate paramater, 1/s
   k = @(Ta) 139.3*exp(-4426/(Ta+273));
-  % equilibrium moisture content of barley
+  % equilibrium moisture content of barley, kg water/kg dry matter
   M_eq = @(Ta,Wa) power(Wa, 0.5)*7040/power(1.8*Ta+32, 2) + 0.06015;
-  % change in moisture content of in slice
-  % during time change "dt"
+  % change in moisture content of in slice after passage of "dt" time
   dM = @(Ta,M,Wa,dt) -k(Ta)*(M-M_eq(Ta, Wa))*dt/(1+k(Ta)*dt/2);
   % change in air moisture content over slice
   dWa = @(rho,dz,dM,G,dt) -rho*dz*dM/(G*dt);
   % heat transfer coefficient, J/(K s m^3)
-  % G - air flow rate, kg/(m^2 s)
-  % Ta - air temp, degC
   h_barley = @(G,Ta) 856800*power(G*(Ta+273)/101325, 0.6);
+
+  % begin outer loop, iterating through every timestep
   for i = 1:nts
+    % calculate current time
     t = i*dt;
+    % get inlet air conditions based on current time and specified air program
     [Ta_in, Wa_in] = air_program(t);
     Tas(1, i) = Ta_in;
     Was(1, i) = Wa_in;
+    % begin inner loop, iterating over every slice of the bed from bottom to top
     for j = 1:nzs
-      dm = 0;
-      dwa = 0;
+      % calculate changes in malt and air moisture and malt and grain temperature
       dm = dM(Tas(j, i), Ms(j, i), Was(j, i), dt);
       dwa = dWa(rho_barley, dz, dm, G, dt);
-      dtg = deltaTg(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tgs(j, i), rho_barley) ;
-      dta = deltaTa(Tgs(j, i), dtg, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
-      if RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) > 98
-        dm_s = dm;
-        ddm = dm_s/10.0;
-        % run condensation procedure as described in
-        % Bala's thesis, pg. 95
+      dtm = dTm(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley) ;
+      dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
+      % enter rewetting routine if the relative humidity is above 98%, as described in Bala's thesis
+      % note that, while the thesis 
+      if RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) > .98
+        %%%% run condensation procedure as described in
+        %%%% Bala's thesis, pg. 95
+	% record the value of 'dm' entering the routine for use later, and set a somewhat arbitrary 'change in the change of malt moisture content': ddm
+	% we use this 'ddm' value to decrement the initial 'dm' value until we find a new value of 'dm' such that the relative humidity is less than 98%
+	% then we will have bracketed the desired value of 'dm', the one at which the relative humidity is exactly 98%, between the 'dm_init' and 'dm', after which we can perform the bisection method to find it
+        dm_init = dm;
+        ddm = dm_init/10.0;
         iters = 0;
-        while RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) > 98 && iters < maxiter
+        while RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) > .98 && iters < BISECTION_MAXITER
           dm = dm - ddm;
           dwa = dWa(rho_barley, dz, dm, G, dt);
-          dtg = deltaTg(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tgs(j, i), rho_barley);
-          dta = deltaTa(Tgs(j, i), dtg, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
+          dtm = dTm(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley);
+          dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
           iters = iters + 1;
 	end
-        if iters == maxiter
-          error('search iterations exceeded')
+        if iters == BISECTION_MAXITER
+          error('search iterations exceeded, desired relative humidity not bracketed')
 	end
+	% set the 'left' and 'right' 'dm' values to begin bisection
         dm_l = dm;
-        dm_r = dm_s;
+        dm_r = dm_init;
         iters = 0;
-        while abs(RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - 98) > CONDENSATION_TOL && iters < maxiter
-          if RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - 98 > 0
+	% perform a bisection-based search for the conditions at which relative humidity is 98% (up to BISECTION_TOL error)
+        while abs(RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - .98) > BISECTION_TOL && iters < BISECTION_MAXITER
+          if RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - .98 > 0
             dm_r = dm;
             dm = dm - (dm_r - dm_l)/2;
           else
@@ -97,20 +119,23 @@ function dry_malt(dt, tfinal, dz, z, air_program)
             dm = dm + (dm_r - dm_l)/2;
 	  end
           dwa = dWa(rho_barley, dz, dm, G, dt);
-          dtg = deltaTg(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tgs(j, i), rho_barley);
-          dta = deltaTa(Tgs(j, i), dtg, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
+          dtm = dTm(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley);
+          dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
           iters = iters + 1;
 	end
-        if iters == maxiter
-          error('bisection iterations exceeded')
+        if iters == BISECTION_MAXITER
+          error('bisection iterations exceeded, could not converge to desired tolerance')
 	end
       end
+      % save calculated conditions and move on to calculate bed conditions at the next time
       Ms(j, i+1) = Ms(j, i) + dm;
-      Tgs(j, i+1) = Tgs(j, i) + dtg;
+      Tms(j, i+1) = Tms(j, i) + dtm;
       Was(j+1, i) = Was(j, i) + dwa;
       Tas(j+1, i) = Tas(j, i) + dta;
     end
   end
+
+  % calculate enzyme activities and plot results of simulation
 
   % show what the avg moisture content looks like
   fig = figure(1);
@@ -122,8 +147,8 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   ylabel(ax, 'Average malt moisture content')
   figure(1)
   
+  % beta glucanase activity
   bg_prof = beta_gluc_profile(Tas(1,:)+273, mean(Ms, 1), times);
-  
   fig = figure(2);
   ax = axes();
   plot(ax, times(1:length(times)-1)/3600.0, bg_prof)
@@ -133,8 +158,8 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   ylabel(ax, '$\beta$ - Glucanase activity (BGU)', 'Interpreter', 'latex')
   figure(2)
 
+  % alpha amylase activity
   am_prof = alpha_am_profile(Tas(1,:)+273, times);
-  
   fig = figure(3);
   ax = axes();
   plot(ax, times(1:length(times)-1)/3600.0, am_prof)
@@ -146,8 +171,8 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   ylim(ax, [20, current_ylim(2)])
   figure(3)
 
+  % diastatic power
   ds_prof = dias_pow_profile(Tas(1,:)+273, mean(Ms, 1), times);
-  
   fig = figure(4);
   ax = axes();
   plot(ax, times(1:length(times)-1)/3600.0, ds_prof)
@@ -157,8 +182,8 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   xlim(ax, [0, current_xlim(2)])
   figure(4)
 
+  % limit dextrinase
   ld_prof = limit_dextrinase_profile(Tas(1,:)+273, mean(Ms, 1), times);
-  
   fig = figure(5);
   ax = axes();
   plot(ax, times(1:length(times)-1)/3600.0, ld_prof)
@@ -168,6 +193,7 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   xlim(ax, [0, current_xlim(2)])
   figure(5)
 
+  % malt temperature evolution at various depths
   fig = figure(6);
   ax = axes();
   hold(ax);
@@ -175,29 +201,29 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   c = ['r'; 'b'; 'k'; 'g'; 'c'; 'm'; 'y'];
   zspacing = nzs/n_zslices;
   for i = 1:n_zslices
-    plot(ax, (1:(nts+1))*dt/3600.0, Tgs(zspacing*(i-1)+1, :), 'DisplayName', ['depth: ', num2str(zspacing*(i-1)*dz), ' m'], 'Color', c(i));
+    plot(ax, (1:(nts+1))*dt/3600.0, Tms(zspacing*(i-1)+1, :), 'DisplayName', ['depth: ', num2str(zspacing*(i-1)*dz), ' m'], 'Color', c(i));
   end
-  plot(ax, (1:(nts+1))*dt/3600.0, Tgs(zspacing*n_zslices, :), 'DisplayName', ['depth: ', num2str(zspacing*(n_zslices)*dz), ' m'], 'Color', c(n_zslices+1));
+  plot(ax, (1:(nts+1))*dt/3600.0, Tms(zspacing*n_zslices, :), 'DisplayName', ['depth: ', num2str(zspacing*(n_zslices)*dz), ' m'], 'Color', c(n_zslices+1));
   xlabel(ax, 'Time (h)');
-  ylabel(ax, 'Grain temperature ($\circ$C)', 'Interpreter', 'latex');
+  ylabel(ax, 'Malt temperature ($\circ$C)', 'Interpreter', 'latex');
   current_xlim = xlim;
   xlim(ax, [0, current_xlim(2)]);
   legend(ax, 'show');
-  figure(5);
+  figure(6);
 
-  % fig = figure(7)
-  % ax = fig.add_subplot(111)
-  % ax.hold(True)
-  % n_zslices = 5
-  % for i = 1:n_zslices
-  %   ax.plot(np.arange(nts)*dt/3600.0, Tas(zspacing*i, :), label='depth: ' + num2str(zspacing*i*dz) + ' m', c=c(i), lw=1)
-  % end
-  % ax.plot(np.arange(nts)*dt/3600.0, Tas(-1, :), label='depth: ' + num2str(zspacing*n_zslices*dz) + ' m', c=c(n_zslices), lw=1)
-  % ax.set_xlabel('Time (h)')
-  % ax.set_ylabel('Air temperature (' + r'$\degree$' + 'C)')
-  % ax.set_xlim(left=0)
-  % ax.legend(loc=4)
-  % plt.show()
+  fig = figure(7)
+  ax = fig.add_subplot(111)
+  ax.hold(True)
+  n_zslices = 5
+  for i = 1:n_zslices
+    ax.plot(np.arange(nts)*dt/3600.0, Tas(zspacing*i, :), label='depth: ' + num2str(zspacing*i*dz) + ' m', c=c(i), lw=1)
+  end
+  ax.plot(np.arange(nts)*dt/3600.0, Tas(-1, :), label='depth: ' + num2str(zspacing*n_zslices*dz) + ' m', c=c(n_zslices), lw=1)
+  ax.set_xlabel('Time (h)')
+  ax.set_ylabel('Air temperature (' + r'$\degree$' + 'C)')
+  ax.set_xlim(left=0)
+  ax.legend(loc=4)
+  plt.show()
 
   % fig = figure(8)
   % ax = fig.add_subplot(111)
@@ -222,34 +248,14 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   % end
   % ax.plot(np.arange(nts+1)*dt/3600.0, Ms(-1, :), label='depth: ' + num2str(zspacing*n_zslices*dz) + ' m', c=c(n_zslices), lw=1)
   % ax.set_xlabel('Time (h)')
-  % ax.set_ylabel('Grain moisture content (kg water/kg dry air)')
+  % ax.set_ylabel('Malt moisture content (kg water/kg dry air)')
   % ax.set_xlim(left=0)
   % ax.legend(loc=1)
   % plt.show()
 end
 
 
-% change in temperature of malt in slice
-function [tg_next] = Tg_next(Wa, dWa, dM, Ta, Cp_grain, M, Cp_water, Cp_watervapor, dz, rho, G, dt, h, Tg)
-  F = -dz*rho/(G*dt);
-  numerator_i = Ta*(1005 + 1820*Wa) - Tg*F*(Cp_grain + M*Cp_water) - 2501000*dWa;
-  D = 2*rho/(h*dt);
-  Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta;
-  numerator_ii = (1005+1820*(Wa+dWa))*(Ta + D*dM*Lv + D*Tg*(Cp_grain + M*Cp_water))/(1 + 1820*D*dM);
-  denominator = (1005+1820*(Wa+dWa))*(D*(Cp_grain + (M+dM)*Cp_water) + 1)/(1 + 1820*D*dM) - F*(Cp_grain + (M+dM)*Cp_water);
-  % print "D:", D, "Lv:", Lv, "Cp_grain:", Cp_grain, "Cp_water:", Cp_water, "because stdout is the best debugger:", (Ta + D*dM*Lv + D*Tg*(Cp_grain + M*Cp_water))
-  % print "num_i:", numerator_i, "num_ii:", numerator_ii, "denom:", denominator
-  tg_next = (numerator_i + numerator_ii)/denominator;
-end
-
-% change in air temperature across slice
-function [ta_next] = Ta_next(Tg, dTg, rho, h, dt, dM, Cp_grain, Cp_water, M, Cp_watervapor, Ta)
-  D = 2*rho/(h*dt);
-  Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta;
-  ta_next = ((Tg+dTg)*(D*(Cp_grain + (M+dM)*Cp_water) + 1) - D*Tg*(Cp_grain + M*Cp_water) - D*dM*Lv - Ta)/(1 + 1820*D*dM);
-end
-
-function [delta_tg] = deltaTg(Wa, dWa, dM, Ta, Cp_grain, M, Cp_water, Cp_watervapor, dz, rho, G, dt, h, Tg, rho_grain)
+function [dtg] = dTm(Wa, dWa, dM, Ta, Cp_malt, M, Cp_water, Cp_watervapor, dz, rho, G, dt, h, Tm, rho_malt)
   % enthalpy of vaporization of water (kJ/ kg) (assumed constant, taken at 25 C)
   L_water = 1000*43.99/18;
   % !!!!!!!!!!!!!!!!!!!!
@@ -261,22 +267,22 @@ function [delta_tg] = deltaTg(Wa, dWa, dM, Ta, Cp_grain, M, Cp_water, Cp_waterva
   % specific heat of malt (kJ/kg K) from thesis
   L_malt = L_water*(1 + 0.5904*exp(-0.1367*M));
   % Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
-  Cp_grain = 1600;
-  F = Cp_watervapor*Ta + L_water - Cp_water*Tg;
-  A = 2*(Ta - Tg);
-  B = Cp_grain + Cp_water*M;
-  % latent heat of grain (J/kg) from thesis
+  Cp_malt = 1600;
+  F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  A = 2*(Ta - Tm);
+  B = Cp_malt + Cp_water*M;
+  % latent heat of malt (J/kg) from thesis
   % Lg = 1000*Lv*(1 + 0.5904*exp(-0.1367*M))
-  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tg;
+  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tm;
   Cp_air = 1006;
-  E = Cp_air + Cp_watervapor*(Wa - rho_grain*dz*dM/(G*dt));
-  F = Cp_watervapor*Ta + L_water - Cp_water*Tg;
-  num = A + rho_grain*dM*(2*Y/hcv + dz*F/(G*E))/dt;
-  denom = 1 + rho_grain*(2*B/hcv + dz*(B + Cp_water*dM)/(G*E))/dt;
-  delta_tg = num/denom;
+  E = Cp_air + Cp_watervapor*(Wa - rho_malt*dz*dM/(G*dt));
+  F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  num = A + rho_malt*dM*(2*Y/hcv + dz*F/(G*E))/dt;
+  denom = 1 + rho_malt*(2*B/hcv + dz*(B + Cp_water*dM)/(G*E))/dt;
+  dtg = num/denom;
 end
 
-function [delta_ta] = deltaTa(Tg, dTg, rho_grain, h, dt, dM, Cp_grain, Cp_water, M, Cp_watervapor, Ta, G, Wa, dz)
+function [dta] = dTa(Tm, dtm, rho_malt, h, dt, dM, Cp_malt, Cp_water, M, Cp_watervapor, Ta, G, Wa, dz)
   % enthalpy of vaporization of water (kJ/ kg) (assumed constant, taken at 25 C)
   L_water = 1000*43.99/18;
   % !!!!!!!!!!!!!!!!!!!!
@@ -288,22 +294,17 @@ function [delta_ta] = deltaTa(Tg, dTg, rho_grain, h, dt, dM, Cp_grain, Cp_water,
   % specific heat of malt (kJ/kg K) from thesis
   L_malt = L_water*(1 + 0.5904*exp(-0.1367*M));
   % Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
-  Cp_grain = 1600;
-  F = Cp_watervapor*Ta + L_water - Cp_water*Tg;
-  A = 2*(Ta - Tg);
-  B = Cp_grain + Cp_water*M;
-  % latent heat of grain (J/kg) from thesis
+  Cp_malt = 1600;
+  F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  A = 2*(Ta - Tm);
+  B = Cp_malt + Cp_water*M;
+  % latent heat of malt (J/kg) from thesis
   % Lg = 1000*Lv*(1 + 0.5904*exp(-0.1367*M))
-  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tg;
+  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tm;
   Cp_air = 1006;
-  E = Cp_air + Cp_watervapor*(Wa - rho_grain*dz*dM/(G*dt));
-  F = Cp_watervapor*Ta + L_water - Cp_water*Tg;
-  delta_ta = -rho_grain*dz*(dTg*(B + Cp_water*dM) - dM*F)/(G*E*dt);
-end
-
-function [ta_next] = Ta_next_check(dz, rho, G, dt, h, Ta, Cp_watervapor, Wa, Tg, dTg, Cp_grain, M, dM, Cp_water, dWa)
-  F = -dz*rho/(G*dt);
-  ta_next = (Ta*(1005 + 1820*Wa) +(Tg+dTg)*F*(Cp_grain + (M+dM)*Cp_water) - Tg*F*(Cp_grain + M*Cp_water) - 2501000*dWa)/(1005 + 1820*(Wa+dWa));
+  E = Cp_air + Cp_watervapor*(Wa - rho_malt*dz*dM/(G*dt));
+  F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  ta = -rho_malt*dz*(dtm*(B + Cp_water*dM) - dM*F)/(G*E*dt);
 end
 
 % partial pressure water, Pa
@@ -315,12 +316,11 @@ function [pw] = Pw(Wa)
   pw = P*Na_dry/(1.0 + Na_dry);
 end
 
+% returns beta_glucanase activity profile based
+% on the drying outputs: air temp, air moisture
+% and their corresponding times
 function [bg_prof] = beta_gluc_profile(Tas, Ms, times)
-  % returns beta_glucanase activity profile based
-  % on the drying outputs: air temp, air moisture
-  % and their corresponding times
-  % !!!!!!!!!!!!!!!!!!!!
-  % uses RK4
+  % uses RK4 to integrate
   beta_init=700;
   nsteps = size(times, 2);
   beta_glucs = zeros(nsteps-1, 1);
@@ -349,11 +349,10 @@ function [bg_prof] = beta_gluc_profile(Tas, Ms, times)
   bg_prof = beta_glucs;
 end
 
+% returns alpha_amylase activity profile based
+% on the drying outputs: air temp, air moisture
+% and their corresponding times
 function [aa_prof] = alpha_am_profile(Tas, times)
-  % returns alpha_amylase activity profile based
-  % on the drying outputs: air temp, air moisture
-  % and their corresponding times
-  % !!!!!!!!!!!!!!!!!!!!
   % uses RK4 for integration
   alpha_init=55;
   nsteps = size(times, 2);
@@ -393,6 +392,9 @@ function [aa_prof] = alpha_am_profile(Tas, times)
   aa_prof = alpha_ams;
 end
 
+% returns alpha_amylase activity profile based
+% on the drying outputs: air temp, air moisture
+% and their corresponding times
 function [dp_f] = dias_pow_f(T, M, dias)
   % dias_prime, 1/s
   % model parameter, pg 161, 1/min
