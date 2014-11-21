@@ -1,13 +1,171 @@
-% % change in height per iteration, m
+%
+% WRITTEN BY ALEXANER HOLIDAY: holiday@alexanderholiday.com
+% 
+
+function dry_malt()
+
+  % set up the gui
+
+  f = figure(101);%, 'Position', [100 100 1000 600]);
+  set(f, 'Position', [100 100 750 400]);
+
+
+  % group relevant gui pieces into panels, here we create one for numerical parameters
+  params_panel = uipanel(f, 'Units', 'pixels',...
+			 'Position', [0, 230, 350, 150],...
+  			 'Title', 'Parameter inputs:');
+
+  % create table for parameter inputs 
+  params_table = uitable(params_panel, 'Units', 'normalized',...
+			 'Position', [0.1, 0.2, 0.8, 0.6],...
+			 'ColumnName', {'z (m)', 'dz (m)', 'dt (s)'},...
+			 'ColumnFormat', {'short', 'short', 'short'},...
+			 'Data', [0.3, 0.01, 500],...
+			 'ColumnEditable', [true, true, true],...
+			 'RowName', []);
+
+  % panel for specification of air program
+  program_panel = uipanel(f, 'Units', 'pixels',...
+			  'Position', [0, 20, 450, 200],...
+  			  'Title', 'Air program specification:');
+
+  % create default program
+  default_entries = [0, 60, 0.008, 0;
+		     20, 65, 0.008, .2;
+		     24, 80, 0.008, .4];
+
+  % create air program table
+  air_prog_table = uitable(program_panel, 'Position', [0, 100, 330, 80],...
+		  'Data', default_entries,...
+		  'ColumnName', {'Start time', 'Inlet temp', 'Inlet humidity', 'Recirculation'},...
+		  'ColumnFormat', {'bank', 'bank', 'numeric', 'bank'},...
+		  'ColumnEditable', [true, true, true, true],...
+		  'RowName', []);
+
+  stop_time_table = uitable(program_panel, 'Position', [350, 50, 100, 40],...
+			    'Data', [25],...
+			    'ColumnName', 'End time',...
+			    'ColumnFormat', {'short'},...
+			    'ColumnEditable', [true],...
+			    'RowName', []);
+
+  % set table dimensions
+  % table.Position(3) = table.Extent(3);
+  % table.Position(4) = table.Extent(4);
+
+  % create button that adds additional row
+  add_row_button = uicontrol(program_panel, 'Style', 'pushbutton',...
+		      'String', 'Add row',...
+		      'Position', [340, 150, 100, 20],...
+		      'Callback', {@add_row, air_prog_table});
+  % add_row.Position(3) = add_row.Extent(3);
+
+  % create button that removes last row
+  delete_row_button = uicontrol(program_panel, 'Style', 'pushbutton',...
+		      'String', 'Delete row',...
+		      'Position', [340, 120, 100, 20],...
+		      'Callback', {@delete_row, air_prog_table});
+  % add_row.Position(3) = add_row.Extent(3);
+
+  plot_panel = uipanel(f, 'Units', 'pixels',...
+			  'Position', [500, 100, 230, 300],...
+  			  'Title', 'Desired plots:');
+
+  % create checkbox labels, then insert evenly spaced checkboxes
+  checkbox_labels = {'Avg moisture',...
+		     'Beta glucanase activity',...
+		     'Alpha amylase activity',...
+		     'Diastatic power',...
+		     'Limit dextrinase',...
+		     'Malt temp profiles',...
+		     'Air temp profiles',...
+		     'Air moisture profiles',...
+		     'Malt moisture profiles'};
+  labels_dim = size(checkbox_labels);
+  nlabels = labels_dim(2);
+  plot_opts = [];
+  for i = 1:nlabels
+      plot_opts(i) = uicontrol(plot_panel, 'Style', 'checkbox',...
+			       'Units', 'normalized',...
+			       'Position', [0.1, 1-1.0*i/nlabels, 0.75, 0.9/nlabels],...
+			       'String', checkbox_labels(i),...
+			       'Value', true);
+  end
+
+  % create button to run model with specified inputs
+  run_button = uicontrol(f, 'Style', 'pushbutton',...
+			    'String', 'Run',...
+			    'Units', 'pixels',...
+			    'Position', [530, 20, 100, 50],...
+			    'Callback', {@parse_and_run, params_table, air_prog_table, stop_time_table, plot_opts});
+
+  function add_row(source, callbackdata, table)
+    % instead of "get(table, 'Data')", should be able to use "table.Data();"
+
+    % reposition table to make new row visible
+    set(table, 'Position', get(table, 'Position') + [0, -20, 0, 20]);
+
+    % find current dimensions and resize table to include an additional row
+    current_dims = size(get(table, 'Data'));
+    new_data = zeros(current_dims + [1, 0]);
+    % add back old data
+    new_data(1:current_dims(1), 1:current_dims(2)) = get(table, 'Data');
+    set(table, 'Data', new_data);
+  end
+
+  function delete_row(source, callbackdata, table)
+    % instead of "get(table, 'Data')", should be able to use "table.Data();"
+
+    % reposition table to make new row visible
+    set(table, 'Position', get(table, 'Position') + [0, 20, 0, -20]);
+
+    % find current dimensions and resize table to include an additional row
+    current_dims = size(get(table, 'Data'));
+    new_data = zeros(current_dims + [-1, 0]);
+    % add back old data
+    old_data = get(table, 'Data');
+    new_data = old_data(1:current_dims(1)-1, 1:current_dims(2));
+    set(table, 'Data', new_data);
+  end
+
+  % function that parses state of plot option checkboxes and runs model
+  function parse_and_run(source, callbackdata, params_table, air_prog_table, stop_time_table, plot_opts)
+
+    params = get(params_table, 'Data');
+    air_prog = get(air_prog_table, 'Data');
+
+    map_keys = {};
+    map_vals = [boolean(1)];
+    i = 1;
+    for opt = plot_opts
+      map_keys(i) = get(opt, 'String');
+      map_vals(i) = boolean(get(opt, 'Value'));
+      i = i + 1;
+    end
+
+    params(length(params)+1) = get(stop_time_table, 'Data');
+    plot_opts = containers.Map(map_keys, map_vals);
+    run_malt_model(params, air_prog, plot_opts);
+  end
+
+end
+
+
 % dz = 0.01
-% % final height, m
-% z = 0.3
-% % change in time per iteration, s
 % dt = 500
 % % final time, s
 % tfinal = 60*60*30
 % dry_malt(dt, tfinal, dz, z, lopez_program)
-function dry_malt(dt, tfinal, dz, z, air_program)
+function run_malt_model(params, air_prog, plot_opts)
+  % % total height, m
+  z = params(1);
+  % % change in height per iteration, m
+  dz = params(2);
+  % % change in time per iteration, s
+  dt = params(3);
+  % % final time, seconds
+  tfinal = params(4)*3600;
+
   % barley density, kg/m^3
   rho_barley = 600.0;
   % dry barley heat capacity, kJ/(kg K)
@@ -20,7 +178,7 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   G = 310/3600.0;
   
   % number of numerical slices, m
-  nzs = z/dz;
+  nzs = int64(z/dz);
   % number of timesteps, s
   nts = tfinal/dt;
   % final time, s
@@ -48,10 +206,6 @@ function dry_malt(dt, tfinal, dz, z, air_program)
 
   times = linspace(0, tfinal, nts+1);
 
-  % numerical tolerance for the bisection method that is performed when simulating rewetting, and the maximum allowable iterations to achieve this precision
-  BISECTION_TOL = 1e-5;
-  BISECTION_MAXITER = 10000;
-
   % define smaller functions
 
   % saturated water vapor pressure, Pa
@@ -73,10 +227,21 @@ function dry_malt(dt, tfinal, dz, z, air_program)
   for i = 1:nts
     % calculate current time
     t = i*dt;
+
     % get inlet air conditions based on current time and specified air program
-    [Ta_in, Wa_in] = air_program(t);
-    Tas(1, i) = Ta_in;
-    Was(1, i) = Wa_in;
+    [Ta_in, Wa_in, recirc] = parse_air_prog(air_prog, t);
+    % Tas(1, i) and Was(1, i) will be mix of outlet air exiting top of bed and fresh inlet air at conditions specified by air_prog
+    % cannot recirculate during first iteration, no bed-output data
+    if i > 1
+      Wa_out = Was(nzs+1, i-1);
+      Ta_out = Tas(nzs+1, i-1);
+      Tas(1, i) = recirc*Ta_out + (1-recirc)*Ta_in;
+      Was(1, i) = recirc*Wa_out + (1-recirc)*Wa_in;
+    else
+      Tas(1, i) = Ta_in;
+      Was(1, i) = Wa_in;
+    end
+
     % begin inner loop, iterating over every slice of the bed from bottom to top
     for j = 1:nzs
       % calculate changes in malt and air moisture and malt and grain temperature
@@ -84,9 +249,22 @@ function dry_malt(dt, tfinal, dz, z, air_program)
       dwa = dWa(rho_barley, dz, dm, G, dt);
       dtm = dTm(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley) ;
       dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
+
+      
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      % BEGIN BISECTION PROCEDURE %
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       % enter rewetting routine if the relative humidity is above 98%, as described in Bala's thesis
       % note that, while the thesis 
       if RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) > .98
+
+	% numerical tolerance for the bisection method that is performed when simulating rewetting, and the maximum allowable iterations to achieve this precision
+	BISECTION_TOL = 1e-5;
+	BISECTION_MAXITER = 10000;
+
         %%%% run condensation procedure as described in
         %%%% Bala's thesis, pg. 95
 	% record the value of 'dm' entering the routine for use later, and set a somewhat arbitrary 'change in the change of malt moisture content': ddm
@@ -109,7 +287,8 @@ function dry_malt(dt, tfinal, dz, z, air_program)
         dm_l = dm;
         dm_r = dm_init;
         iters = 0;
-	% perform a bisection-based search for the conditions at which relative humidity is 98% (up to BISECTION_TOL error)
+
+	% now that the desired properties are bracketed, perform a bisection-based search for the conditions at which relative humidity is 98% (up to BISECTION_TOL error)
         while abs(RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - .98) > BISECTION_TOL && iters < BISECTION_MAXITER
           if RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - .98 > 0
             dm_r = dm;
@@ -127,6 +306,13 @@ function dry_malt(dt, tfinal, dz, z, air_program)
           error('bisection iterations exceeded, could not converge to desired tolerance')
 	end
       end
+
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      % END BISECTION PROCEDURE %
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
       % save calculated conditions and move on to calculate bed conditions at the next time
       Ms(j, i+1) = Ms(j, i) + dm;
       Tms(j, i+1) = Tms(j, i) + dtm;
@@ -135,125 +321,100 @@ function dry_malt(dt, tfinal, dz, z, air_program)
     end
   end
 
-  % calculate enzyme activities and plot results of simulation
+  % plot desired results
 
-  % show what the avg moisture content looks like
-  fig = figure(1);
-  ax = axes();
-  plot(ax, times/3600.0, mean(Ms, 1))
-  current_xlim = xlim;
-  xlim(ax, [0, current_xlim(2)])
-  xlabel(ax, 'Time (h)')
-  ylabel(ax, 'Average malt moisture content')
-  figure(1)
-  
-  % beta glucanase activity
-  bg_prof = beta_gluc_profile(Tas(1,:)+273, mean(Ms, 1), times);
-  fig = figure(2);
-  ax = axes();
-  plot(ax, times(1:length(times)-1)/3600.0, bg_prof)
-  current_xlim = xlim;
-  xlim(ax, [0, current_xlim(2)])
-  xlabel(ax, 'Time (h)')
-  ylabel(ax, '$\beta$ - Glucanase activity (BGU)', 'Interpreter', 'latex')
-  figure(2)
-
-  % alpha amylase activity
-  am_prof = alpha_am_profile(Tas(1,:)+273, times);
-  fig = figure(3);
-  ax = axes();
-  plot(ax, times(1:length(times)-1)/3600.0, am_prof)
-  xlabel(ax, 'Time (h)')
-  ylabel(ax, '$\alpha$ - Amylase activity (DU/g dm)', 'Interpreter', 'latex')
-  current_xlim = xlim;
-  xlim(ax, [0, current_xlim(2)])
-  current_ylim = ylim;
-  ylim(ax, [20, current_ylim(2)])
-  figure(3)
-
-  % diastatic power
-  ds_prof = dias_pow_profile(Tas(1,:)+273, mean(Ms, 1), times);
-  fig = figure(4);
-  ax = axes();
-  plot(ax, times(1:length(times)-1)/3600.0, ds_prof)
-  xlabel(ax, 'Time (h)')
-  ylabel(ax, ('Diastatic power (WK/ 100 g dm)'))
-  current_xlim = xlim;
-  xlim(ax, [0, current_xlim(2)])
-  figure(4)
-
-  % limit dextrinase
-  ld_prof = limit_dextrinase_profile(Tas(1,:)+273, mean(Ms, 1), times);
-  fig = figure(5);
-  ax = axes();
-  plot(ax, times(1:length(times)-1)/3600.0, ld_prof)
-  xlabel(ax, 'Time (h)')
-  ylabel(ax, ('Limit-dextrinase (RPU/ 100 g dm)'))
-  current_xlim = xlim;
-  xlim(ax, [0, current_xlim(2)])
-  figure(5)
-
-  % malt temperature evolution at various depths
-  fig = figure(6);
-  ax = axes();
-  hold(ax);
-  n_zslices = 5;
-  c = ['r'; 'b'; 'k'; 'g'; 'c'; 'm'; 'y'];
-  zspacing = nzs/n_zslices;
-  for i = 1:n_zslices
-    plot(ax, (1:(nts+1))*dt/3600.0, Tms(zspacing*(i-1)+1, :), 'DisplayName', ['depth: ', num2str(zspacing*(i-1)*dz), ' m'], 'Color', c(i));
+  if plot_opts('Avg moisture')
+    % show what the avg moisture content looks like
+    plot_xy(001, times/3600.0, mean(Ms, 1), 'Time (h)', 'Average malt moisture content');
   end
-  plot(ax, (1:(nts+1))*dt/3600.0, Tms(zspacing*n_zslices, :), 'DisplayName', ['depth: ', num2str(zspacing*(n_zslices)*dz), ' m'], 'Color', c(n_zslices+1));
-  xlabel(ax, 'Time (h)');
-  ylabel(ax, 'Malt temperature ($\circ$C)', 'Interpreter', 'latex');
-  current_xlim = xlim;
-  xlim(ax, [0, current_xlim(2)]);
-  legend(ax, 'show');
-  figure(6);
 
-  fig = figure(7)
-  ax = fig.add_subplot(111)
-  ax.hold(True)
-  n_zslices = 5
-  for i = 1:n_zslices
-    ax.plot(np.arange(nts)*dt/3600.0, Tas(zspacing*i, :), label='depth: ' + num2str(zspacing*i*dz) + ' m', c=c(i), lw=1)
+  if plot_opts('Beta glucanase activity')
+    % beta glucanase activity
+    plot_xy(002, times(1:length(times)-1)/3600.0, beta_gluc_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', '$\beta$ - Glucanase activity (BGU)');
   end
-  ax.plot(np.arange(nts)*dt/3600.0, Tas(-1, :), label='depth: ' + num2str(zspacing*n_zslices*dz) + ' m', c=c(n_zslices), lw=1)
-  ax.set_xlabel('Time (h)')
-  ax.set_ylabel('Air temperature (' + r'$\degree$' + 'C)')
-  ax.set_xlim(left=0)
-  ax.legend(loc=4)
-  plt.show()
 
-  % fig = figure(8)
-  % ax = fig.add_subplot(111)
-  % ax.hold(True)
-  % n_zslices = 5
-  % for i = 1:n_zslices
-  %   ax.plot(np.arange(nts)*dt/3600.0, Was(zspacing*i, :), label='depth: ' + num2str(zspacing*i*dz) + ' m', c=c(i), lw=1)
-  % end
-  % ax.plot(np.arange(nts)*dt/3600.0, Was(-1, :), label='depth: ' + num2str(zspacing*n_zslices*dz) + ' m', c=c(n_zslices), lw=1)
-  % ax.set_xlabel('Time (h)')
-  % ax.set_ylabel('Air moisture content (kg water/kg dry air)')
-  % ax.set_xlim(left=0)
-  % ax.legend(loc=1)
-  % plt.show()
+  if plot_opts('Alpha amylase activity')
+    % alpha amylase activity
+    plot_xy(003, times(1:length(times)-1)/3600.0, alpha_am_profile(Tas(1,:)+273, times), 'Time (h)', '$\alpha$ - Amylase activity (DU/g dm)')
+  end
 
-  % fig = figure(9)
-  % ax = fig.add_subplot(111)
-  % ax.hold(True)
-  % n_zslices = 5
-  % for i = 1:n_zslices
-  %   ax.plot(np.arange(nts+1)*dt/3600.0, Ms(zspacing*i, :), label='depth: ' + num2str(zspacing*i*dz) + ' m', c=c(i), lw=1)
-  % end
-  % ax.plot(np.arange(nts+1)*dt/3600.0, Ms(-1, :), label='depth: ' + num2str(zspacing*n_zslices*dz) + ' m', c=c(n_zslices), lw=1)
-  % ax.set_xlabel('Time (h)')
-  % ax.set_ylabel('Malt moisture content (kg water/kg dry air)')
-  % ax.set_xlim(left=0)
-  % ax.legend(loc=1)
-  % plt.show()
+  if plot_opts('Diastatic power')
+    % diastatic power
+    plot_xy(004, times(1:length(times)-1)/3600.0, dias_pow_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', 'Diastatic power (WK/ 100 g dm)')
+  end
+
+  if plot_opts('Limit dextrinase')
+    % limit dextrinase
+    plot_xy(005, times(1:length(times)-1)/3600.0, limit_dextrinase_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', 'Limit-dextrinase (RPU/ 100 g dm)')
+  end
+
+  if plot_opts('Malt temp profiles')
+    % malt temperature evolution at various depths
+    plot_xy_slices(006, (1:(nts+1))*dt/3600.0, Tms, 'Time (h)', 'Malt temperature ($\circ$C)', 5, dz)
+  end
+
+  if plot_opts('Air temp profiles')
+    % air temperature evolution at various depths
+    plot_xy_slices(007, (1:nts)*dt/3600.0, Tas, 'Time (h)', 'Air temperature ($\circ$C)', 5, dz)
+  end
+
+  if plot_opts('Air moisture profiles')
+    % air moisture evolution at various depths
+    plot_xy_slices(008, (1:nts)*dt/3600.0, Was, 'Time (h)', 'Air moisture content (kg water/kg dry air)', 5, dz)
+  end
+
+
+  if plot_opts('Malt moisture profiles')
+    % malt moisture evolution at various depths
+    plot_xy_slices(009, (1:(nts+1))*dt/3600.0, Ms, 'Time (h)', 'Malt moisture content (kg water/kg dry air)', 5, dz)
+  end
+
 end
 
+function [Ta_in, Wa_in, recirc] = parse_air_prog(air_prog, t)
+  i = 1;
+  air_prog_dims = size(air_prog);
+  while i <= air_prog_dims(1) && t >= 3600*air_prog(i, 1)
+    i = i + 1;
+  end
+  out_cell = num2cell(air_prog(i-1, 2:4));
+  [Ta_in, Wa_in, recirc] = out_cell{:};
+end
+
+function plot_xy(fig_handle, xdata, ydata, xlab, ylab)
+  fig = figure(fig_handle);
+  ax = axes();
+
+  plot(ax, xdata, ydata);
+
+  xlim(ax, [0, max(xdata)]);
+  xlabel(ax, xlab);
+  ylabel(ax, ylab, 'Interpreter', 'latex');
+  figure(fig_handle);
+end
+
+function plot_xy_slices(fig_handle, xdata, ydata, xlab, ylab, nslices, dz)
+  fig = figure(fig_handle);
+  ax = axes();
+  hold(ax);
+  c = ['r'; 'b'; 'k'; 'g'; 'c'; 'm'; 'y'];
+  y_dims = size(ydata);
+  nzs = y_dims(1);
+  nslices = nslices - 1;
+  zspacing = floor(1.0*nzs/nslices);
+
+  % plot evenly-space, (nslices-1) profiles, then add profile at z=0
+  for i = 1:nslices
+    plot(ax, xdata, ydata(zspacing*i,:), 'DisplayName', ['depth: ', num2str(zspacing*i*dz), ' m'], 'Color', c(i));
+  end
+  plot(ax, xdata, ydata(1,:), 'DisplayName', 'depth: 0 m', 'Color', c(nslices+1));
+
+  xlabel(ax, xlab);
+  ylabel(ax, ylab, 'Interpreter', 'latex');
+  xlim(ax, [0, max(xdata)]);
+  legend(ax, 'show', 'Location', 'northwest');
+  figure(006);
+end
 
 function [dtg] = dTm(Wa, dWa, dM, Ta, Cp_malt, M, Cp_water, Cp_watervapor, dz, rho, G, dt, h, Tm, rho_malt)
   % enthalpy of vaporization of water (kJ/ kg) (assumed constant, taken at 25 C)
@@ -304,7 +465,7 @@ function [dta] = dTa(Tm, dtm, rho_malt, h, dt, dM, Cp_malt, Cp_water, M, Cp_wate
   Cp_air = 1006;
   E = Cp_air + Cp_watervapor*(Wa - rho_malt*dz*dM/(G*dt));
   F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
-  ta = -rho_malt*dz*(dtm*(B + Cp_water*dM) - dM*F)/(G*E*dt);
+  dta = -rho_malt*dz*(dtm*(B + Cp_water*dM) - dM*F)/(G*E*dt);
 end
 
 % partial pressure water, Pa
