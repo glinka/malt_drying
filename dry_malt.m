@@ -16,17 +16,18 @@ function dry_malt()
 
   % group relevant gui pieces into panels, here we create one for numerical parameters
   params_panel = uipanel(f, 'Units', 'centimeters',...
-			 'Position', [0, 6.0000, 7.0500, 2.1000],...
+			 'Position', [7.6, 6.0000, 11.0500, 2.5000],...
   			 'Title', 'Parameter inputs:');
 
   % create table for parameter inputs 
   % 228/6.43, 40/1.2
+			 % [0.2820, 0.1500, 6.4, 1.2300]
   params_table = uitable(params_panel, 'Units', 'centimeters',...
-			 'Position', [0.2820, 0.1500, 6.4296, 1.2300],...
-			 'ColumnName', {'z (m)', 'dz (m)', 'dt (s)'},...
-			 'ColumnFormat', {'short', 'short', 'short'},...
-			 'Data', [0.3, 0.01, 500],...
-			 'ColumnEditable', [true, true, true],...
+			 'Position', [0.2820, 0.1500, 10.4, 1.65],...
+			 'ColumnName', {'z (m)', 'dz (m)', 'dt (s)', 'Initial malt moisture|(kg water/kg dry malt)'},...
+			 'ColumnFormat', {'short', 'short', 'short', 'short'},...
+			 'Data', [0.3, 0.01, 500, 0.8],...
+			 'ColumnEditable', [true, true, true, true],...
 			 'RowName', []);
   % params_table.Position(3:4) = params_table.Extent(3:4);
 
@@ -80,7 +81,7 @@ function dry_malt()
   % add_row.Position(3) = add_row.Extent(3);
 
   plot_panel = uipanel(f, 'Units', 'centimeters',...
-			  'Position', [7.6140, 0.6000, 6.4860, 9.0000],...
+			  'Position', [0.6, 0.6000, 6.4860, 9.0000],...
   			  'Title', 'Desired plots:');
 
   % create checkbox labels, then insert evenly spaced checkboxes
@@ -123,7 +124,7 @@ function dry_malt()
   run_button = uicontrol(f, 'Style', 'pushbutton',...
 			    'String', 'Run',...
 			    'Units', 'centimeters',...
-			    'Position', [15.5100, 4.5000, 2.8200, 1.5000],...
+			    'Position', [12, 2.5000, 2.8200, 1.5000],...
 			    'Callback', {@parse_and_run, params_table, air_prog_table, stop_time_table, plot_opts});
 
   function set_all(source, callback, newvalue, plot_opts)
@@ -213,8 +214,10 @@ function run_malt_model(params, air_prog, plot_opts)
   dz = params(2);
   % % change in time per iteration, s
   dt = params(3);
+  % % initial malt moisture content, kg water/kg dry matter
+  Ms_init = params(4);
   % % final time, seconds
-  tfinal = params(4)*3600;
+  tfinal = params(5)*3600;
 
   % barley density, kg/m^3
   rho_barley = 600.0;
@@ -250,8 +253,6 @@ function run_malt_model(params, air_prog, plot_opts)
   % setting intitial temperature throughout the bed
   Tms(:, 1) = Tm_init*ones(nzs,1);
   
-  % initial malt moisture content, kg water/kg dry matter
-  Ms_init = 0.8;
   % setting intitial malt moisture content throughout the bed
   Ms(:, 1) = Ms_init*ones(nzs, 1);
 
@@ -386,50 +387,58 @@ function run_malt_model(params, air_prog, plot_opts)
 
   % plot desired results
 
+  handle = 002;
   if plot_opts('Avg moisture')
     % show what the avg moisture content looks like
-    plot_xy(001, times/3600.0, mean(Ms, 1), 'Time (h)', 'Average malt moisture content');
+    plot_xy(handle, times/3600.0, mean(Ms, 1), 'Time (h)', 'Average malt moisture content');
   end
 
+  handle = handle + 1;
   if plot_opts('Beta glucanase activity')
     % beta glucanase activity
-    plot_xy(002, times(1:length(times)-1)/3600.0, beta_gluc_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', '$\beta$ - Glucanase activity (BGU)');
+    plot_xy(handle, times(1:length(times)-1)/3600.0, beta_gluc_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', '$\beta$ - Glucanase activity (BGU)');
   end
 
+  handle = handle + 1;
   if plot_opts('Alpha amylase activity')
     % alpha amylase activity
-    plot_xy(003, times(1:length(times)-1)/3600.0, alpha_am_profile(Tas(1,:)+273, times), 'Time (h)', '$\alpha$ - Amylase activity (DU/g dm)')
+    plot_xy(handle, times(1:length(times)-1)/3600.0, alpha_am_profile(Tas(1,:)+273, times), 'Time (h)', '$\alpha$ - Amylase activity (DU/g dm)')
   end
 
+  handle = handle + 1;
   if plot_opts('Diastatic power')
     % diastatic power
-    plot_xy(004, times(1:length(times)-1)/3600.0, dias_pow_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', 'Diastatic power (WK/ 100 g dm)')
+    plot_xy(handle, times(1:length(times)-1)/3600.0, dias_pow_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', 'Diastatic power (WK/ 100 g dm)')
   end
 
+  handle = handle + 1;
   if plot_opts('Limit dextrinase')
     % limit dextrinase
-    plot_xy(005, times(1:length(times)-1)/3600.0, limit_dextrinase_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', 'Limit-dextrinase (RPU/ 100 g dm)')
+    plot_xy(handle, times(1:length(times)-1)/3600.0, limit_dextrinase_profile(Tas(1,:)+273, mean(Ms, 1), times), 'Time (h)', 'Limit-dextrinase (RPU/ 100 g dm)')
   end
 
+  handle = handle + 1;
   if plot_opts('Malt temp profiles')
     % malt temperature evolution at various depths
-    plot_xy_slices(006, (1:(nts+1))*dt/3600.0, Tms, 'Time (h)', 'Malt temperature ($\circ$C)', 5, dz)
+    plot_xy_slices(handle, (1:(nts+1))*dt/3600.0, Tms, 'Time (h)', 'Malt temperature ($\circ$C)', 5, dz)
   end
 
+  handle = handle + 1;
   if plot_opts('Air temp profiles')
     % air temperature evolution at various depths
-    plot_xy_slices(007, (1:nts)*dt/3600.0, Tas, 'Time (h)', 'Air temperature ($\circ$C)', 5, dz)
+    plot_xy_slices(handle, (1:nts)*dt/3600.0, Tas, 'Time (h)', 'Air temperature ($\circ$C)', 5, dz)
   end
 
+  handle = handle + 1;
   if plot_opts('Air RH profiles')
     % air moisture evolution at various depths
-    plot_xy_slices(008, (1:nts)*dt/3600.0, RHs, 'Time (h)', 'Air RH (kg water/kg dry air)', 5, dz)
+    plot_xy_slices(handle, (1:nts)*dt/3600.0, RHs, 'Time (h)', 'Air RH (kg water/kg dry air)', 5, dz)
   end
 
-
+  handle = handle + 1;
   if plot_opts('Malt moisture profiles')
     % malt moisture evolution at various depths
-    plot_xy_slices(009, (1:(nts+1))*dt/3600.0, Ms, 'Time (h)', 'Malt moisture content (kg water/kg dry air)', 5, dz)
+    plot_xy_slices(handle, (1:(nts+1))*dt/3600.0, Ms, 'Time (h)', 'Malt moisture content (kg water/kg dry air)', 5, dz)
   end
 
 end
