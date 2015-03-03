@@ -202,33 +202,37 @@ function dry_malt()
 end
 
 
-% dz = 0.01
-% dt = 500
-% % final time, s
-% tfinal = 60*60*30
-% dry_malt(dt, tfinal, dz, z, lopez_program)
 function run_malt_model(params, air_prog, plot_opts)
-  % % total height, m
+  % retrieve parameters from gui
+  % total height, m
   z = params(1);
-  % % change in height per iteration, m
+  % change in height per iteration, m
   dz = params(2);
-  % % change in time per iteration, s
+  % change in time per iteration, s
   dt = params(3);
-  % % initial malt moisture content, kg water/kg dry matter
+  % initial malt moisture content, kg water/kg dry matter
   Ms_init = params(4);
-  % % final time, seconds
+  % final time, s
   tfinal = params(5)*3600;
 
   % barley density, kg/m^3
-  rho_barley = 600.0;
+  % Bala's thesis, pg. 10
+  % assumed constant
+  % note that pg. 114 suggested using 608.0 instead
+  rho_barley = 527.0;
   % dry barley heat capacity, kJ/(kg K)
-  Cp_barley = 1.300;
+  % Bala's thesis, pg. 16
+  % assumed constant
+  Cp_barley = 1.651;
   % specific heat of water vapor kJ/(kg K)
+  % assumed constant, taken at 325 K
   Cp_watervapor = 1.870;
   % specific heat of water  kJ/(kg K)
+  % assumed constant
   Cp_water = 4.180;
   % air inflow rate, kg/(m^2 s)
-  G = 310/3600.0;
+  % Bala's thesis, pg. 114
+  G = 23.41/60.0;
   
   % number of numerical slices, m
   nzs = int64(z/dz);
@@ -252,25 +256,30 @@ function run_malt_model(params, air_prog, plot_opts)
   Tm_init = 20;
   % setting intitial temperature throughout the bed
   Tms(:, 1) = Tm_init*ones(nzs,1);
-  
   % setting intitial malt moisture content throughout the bed
   Ms(:, 1) = Ms_init*ones(nzs, 1);
-
   times = linspace(0, tfinal, nts+1);
 
   % define smaller functions
-
   % saturated water vapor pressure, Pa
+  % Food Plant Design, Antonio Lopez-Gomez, Gustavo V. pg. 88
   Ps = @(Ta) 100000*exp(14.293  - 5291/(Ta + 273.15))/(3.2917 - 0.01527*(Ta + 273.15) + 2.54e-5*power(Ta + 273.15, 2));
   % relative humidity
+  % by definition
   RH = @(Pw,Ps) Pw/Ps;
   % drying rate paramater, 1/s
-  k = @(Ta) 139.3*exp(-4426/(Ta+273));
+  % Bala's thesis, pg. 77
+  k = @(Ta) 9.5294e6*exp(-6725.02/(Ta+273.15));
+  % !!!!!!!!!!!!!!!!!!!!
+  % to use the value found in the internal Cargill report: "MOISTURE SORPTION ISOTHERMS FOR GERMINATED BARLEY" by Elizabeth Reid, pg. 16
+  % one would need to water activity
+  % !!!!!!!!!!!!!!!!!!!!
   % equilibrium moisture content of barley, kg water/kg dry matter
   M_eq = @(Ta,Wa) power(Wa, 0.5)*7040/power(1.8*Ta+32, 2) + 0.06015;
   % change in moisture content of in slice after passage of "dt" time
   dM = @(Ta,M,Wa,dt) -k(Ta)*(M-M_eq(Ta, Wa))*dt/(1+k(Ta)*dt/2);
   % change in air moisture content over slice
+  % Bala's thesis, pg. 90
   dWa = @(rho,dz,dM,G,dt) -rho*dz*dM/(G*dt);
   % heat transfer coefficient, J/(K s m^3)
   h_barley = @(G,Ta) 856800*power(G*(Ta+273)/101325, 0.6);
@@ -280,16 +289,10 @@ function run_malt_model(params, air_prog, plot_opts)
     % calculate current time
     t = i*dt;
 
-    % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    % not actually inputing RH values right now, using
-    % old Wa_in values intead, change next line of code
-    % to RH_in soon
-    % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
     % get inlet air conditions based on current time and specified air program
     [G_in, Ta_in, RH_in, recirc] = parse_air_prog(air_prog, t);
     Wa_in = Wa_from_rh(RH_in, Ps(Ta_in));
-    % RH_in - Pw(Wa_in)/Ps(Ta_in)
+
     % Tas(1, i) and Was(1, i) will be mix of outlet air exiting top of bed and fresh inlet air at conditions specified by air_prog
     % cannot recirculate during first iteration, no bed-output data
     if i > 1
@@ -319,7 +322,6 @@ function run_malt_model(params, air_prog, plot_opts)
       % BEGIN BISECTION PROCEDURE %
       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
       % enter rewetting routine if the relative humidity is above 98%, as described in Bala's thesis
       % note that, while the thesis 
       if RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) > .98
@@ -369,7 +371,6 @@ function run_malt_model(params, air_prog, plot_opts)
           error('bisection iterations exceeded, could not converge to desired tolerance')
 	end
       end
-
       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
       % END BISECTION PROCEDURE %
@@ -419,24 +420,40 @@ function run_malt_model(params, air_prog, plot_opts)
 
   handle = handle + 1;
   if plot_opts('Malt temp profiles')
+    % plot average first
+    fig = figure(handle);
+    ax = gca;
+    plot(ax, (1:(nts+1))*dt/3600.0, mean(Tms, 1), 'DisplayName', 'average', 'Color', 'r', 'Linewidth', 2.0);
     % malt temperature evolution at various depths
     plot_xy_slices(handle, (1:(nts+1))*dt/3600.0, Tms, 'Time (h)', 'Malt temperature ($\circ$C)', 5, dz)
   end
 
   handle = handle + 1;
   if plot_opts('Air temp profiles')
+    % plot average first
+    fig = figure(handle);
+    ax = gca;
+    plot(ax, (1:nts)*dt/3600.0, mean(Tas, 1), 'DisplayName', 'average', 'Color', 'r', 'Linewidth', 2.0);
     % air temperature evolution at various depths
     plot_xy_slices(handle, (1:nts)*dt/3600.0, Tas, 'Time (h)', 'Air temperature ($\circ$C)', 5, dz)
   end
 
   handle = handle + 1;
   if plot_opts('Air RH profiles')
+    % plot average first
+    fig = figure(handle);
+    ax = gca;
+    plot(ax, (1:(nts))*dt/3600.0, mean(RHs, 1), 'DisplayName', 'average', 'Color', 'r', 'Linewidth', 2.0);
     % air moisture evolution at various depths
     plot_xy_slices(handle, (1:nts)*dt/3600.0, RHs, 'Time (h)', 'Air RH (kg water/kg dry air)', 5, dz)
   end
 
   handle = handle + 1;
   if plot_opts('Malt moisture profiles')
+    % plot average first
+    fig = figure(handle);
+    ax = gca;
+    plot(ax, (1:(nts+1))*dt/3600.0, mean(Ms, 1), 'DisplayName', 'average', 'Color', 'r', 'Linewidth', 2.0);
     % malt moisture evolution at various depths
     plot_xy_slices(handle, (1:(nts+1))*dt/3600.0, Ms, 'Time (h)', 'Malt moisture content (kg water/kg dry air)', 5, dz)
   end
@@ -457,7 +474,7 @@ end
 
 function plot_xy(fig_handle, xdata, ydata, xlab, ylab)
   fig = figure(fig_handle);
-  ax = axes();
+  ax = gca;
 
   plot(ax, xdata, ydata);
 
@@ -469,20 +486,21 @@ end
 
 function plot_xy_slices(fig_handle, xdata, ydata, xlab, ylab, nslices, dz)
   fig = figure(fig_handle);
-  ax = axes();
+  ax = gca;
   hold(ax);
   c = ['r'; 'b'; 'k'; 'g'; 'c'; 'm'; 'y'];
+  markers = ['o', '+', '*', '.', 's', 'v', 'p'];
   y_dims = size(ydata);
   nzs = y_dims(1);
   nslices = nslices - 1;
   zspacing = floor(1.0*nzs/nslices);
 
   % plot evenly-space, (nslices-2) profiles, then add profile at z=0 and z=top
-  plot(ax, xdata, ydata(1,:), 'DisplayName', 'depth: 0 m (bottom)', 'Color', c(nslices+1));
+  plot(ax, xdata, ydata(1,:), 'DisplayName', 'depth: 0 m (bottom)', 'Color', c(nslices+1), 'Marker', markers(nslices+1));
   for i = 1:nslices-1
-    plot(ax, xdata, ydata(zspacing*i,:), 'DisplayName', ['depth: ', num2str(zspacing*i*dz), ' m'], 'Color', c(i));
+    plot(ax, xdata, ydata(zspacing*i,:), 'DisplayName', ['depth: ', num2str(zspacing*i*dz), ' m'], 'Color', c(i), 'Marker', markers(i));
   end
-  plot(ax, xdata, ydata(nzs,:), 'DisplayName', ['depth: ', num2str(nzs*dz), ' m (top)'], 'Color', c(nslices+1));
+  plot(ax, xdata, ydata(nzs,:), 'DisplayName', ['depth: ', num2str(nzs*dz), ' m (top)'], 'Color', c(nslices+2), 'Marker', markers(nslices+2));
 
   xlabel(ax, xlab);
   ylabel(ax, ylab, 'Interpreter', 'latex');
@@ -491,72 +509,91 @@ function plot_xy_slices(fig_handle, xdata, ydata, xlab, ylab, nslices, dz)
   figure(fig_handle);
 end
 
+% change in malt temperature
+% Bala's thesis, pg. 93
 function [dtg] = dTm(Wa, dWa, dM, Ta, Cp_malt, M, Cp_water, Cp_watervapor, dz, rho, G, dt, h, Tm, rho_malt)
-  % enthalpy of vaporization of water (kJ/ kg) (assumed constant, taken at 25 C)
+  % enthalpy of vaporization of water (kJ/ kg) 
+  % assumed constant, taken at 25 C
   L_water = 1000*43.99/18;
-  % !!!!!!!!!!!!!!!!!!!!
-  %    UNITS of hcv??
-  % !!!!!!!!!!!!!!!!!!!!
-  % either J/s m^3 K or kJ/min m^3 K
-  % hcv = 49.32*1000*np.power(G, 0.6906)
+  % kJ/min m^3 K
+  % Bala's thesis, pg. 44
   hcv = 49.32*power(G, 0.6906)*60;
-  % specific heat of malt (kJ/kg K) from thesis
+  % specific heat of malt (kJ/kg K)
+  % Bala's thesis, pg. 23
   L_malt = L_water*(1 + 0.5904*exp(-0.1367*M));
-  % Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
-  Cp_malt = 1600;
-  F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  % specific heat of air (kg/kg K)
+  % assumed constant, taken at 45 C from http://www.engineeringtoolbox.com/air-properties-d_156.html
+  Cp_air = 1006;
+  % helper variables
+  % Bala's thesis, pg. 93
   A = 2*(Ta - Tm);
   B = Cp_malt + Cp_water*M;
-  % latent heat of malt (J/kg) from thesis
-  % Lg = 1000*Lv*(1 + 0.5904*exp(-0.1367*M))
-  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tm;
-  Cp_air = 1006;
-  E = Cp_air + Cp_watervapor*(Wa - rho_malt*dz*dM/(G*dt));
   F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tm;
+  E = Cp_air + Cp_watervapor*(Wa - rho_malt*dz*dM/(G*dt));
   num = A + rho_malt*dM*(2*Y/hcv + dz*F/(G*E))/dt;
   denom = 1 + rho_malt*(2*B/hcv + dz*(B + Cp_water*dM)/(G*E))/dt;
+  % change in malt temperature
+  % Bala's thesis, pg. 93
   dtg = num/denom;
 end
 
+% change in air temperature
+% Bala's thesis, pg. 92-93
 function [dta] = dTa(Tm, dtm, rho_malt, h, dt, dM, Cp_malt, Cp_water, M, Cp_watervapor, Ta, G, Wa, dz)
-  % enthalpy of vaporization of water (kJ/ kg) (assumed constant, taken at 25 C)
+  % enthalpy of vaporization of water (kJ/ kg) 
+  % assumed constant, taken at 25 C
   L_water = 1000*43.99/18;
-  % !!!!!!!!!!!!!!!!!!!!
-  %    UNITS of hcv??
-  % !!!!!!!!!!!!!!!!!!!!
-  % either J/s m^3 K or kJ/min m^3 K
-  % hcv = 49.32*1000*power(G, 0.6906)
+  % kJ/min m^3 K
+  % Bala's thesis, pg. 44
   hcv = 49.32*power(G, 0.6906)*60;
-  % specific heat of malt (kJ/kg K) from thesis
+  % specific heat of malt (kJ/kg K)
+  % Bala's thesis, pg. 23
   L_malt = L_water*(1 + 0.5904*exp(-0.1367*M));
-  % Lv = 2501000 + 1820*Ta - Cp_watervapor*Ta
-  Cp_malt = 1600;
-  F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  % specific heat of air (kg/kg K)
+  % assumed constant, taken at 45 C from http://www.engineeringtoolbox.com/air-properties-d_156.html
+  Cp_air = 1006;
+  % helper variables
+  % Bala's thesis, pg. 93
   A = 2*(Ta - Tm);
   B = Cp_malt + Cp_water*M;
-  % latent heat of malt (J/kg) from thesis
-  % Lg = 1000*Lv*(1 + 0.5904*exp(-0.1367*M))
-  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tm;
-  Cp_air = 1006;
-  E = Cp_air + Cp_watervapor*(Wa - rho_malt*dz*dM/(G*dt));
   F = Cp_watervapor*Ta + L_water - Cp_water*Tm;
+  Y = L_malt + Cp_watervapor*Ta - Cp_water*Tm;
+  E = Cp_air + Cp_watervapor*(Wa - rho_malt*dz*dM/(G*dt));
+  % change in air temperature
+  % Bala's thesis, pg. 93
   dta = -rho_malt*dz*(dtm*(B + Cp_water*dM) - dM*F)/(G*E*dt);
 end
 
 % partial pressure water, Pa
+% given air moisture content, kg water/kg dry air
 function [pw] = Pw(Wa)
+  % molecular weight of water, g/mol
   MW_water = 18.0;
+  % molecular weight of air, g/mol
   MW_air = 28.96;
+  % atmospheric pressure, Pa
   P = 101325;
+  % moles water/moles dry air
   Na_dry = Wa*MW_air/MW_water;
+  % definition of partial pressure:
+  % pressure * mole fraction water in air, Pa
   pw = P*Na_dry/(1.0 + Na_dry);
 end
 
+% air moisture content, kg water/kg dry air
+% given relative humidity and saturation pressure
 function [wa] = Wa_from_rh(RH, Ps)
-  pw = RH*Ps;
+  % molecular weight of water, g/mol
   MW_water = 18.0;
+  % molecular weight of air, g/mol
   MW_air = 28.96;
+  % atmospheric pressure, Pa
   P = 101325;
+  % partial pressure water, Pa
+  % by definition
+  pw = RH*Ps;
+  % solving for Wa in Na_dry and pw equations in function [pw] = Pw(Wa)
   wa = pw/(P-pw)*(MW_water/MW_air);
 end
 
@@ -606,14 +643,12 @@ function [aa_prof] = alpha_am_profile(Tas, times)
   R = 8.3143;
   % model parameter, pg 161, 1/min
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  % !!!!!!!!!!!!!!!!!!!!
-  %    UNITS of k_alpha0??
+  % UNITS of k_alpha0??
   % PAPER'S VALUE IS 5.7654e9
   % BUT THIS APPEARS TO BE ORDERS OF
   % MAGNITUDE OFF. THE CURRENT VALUE
   % of 5.7654e7 PRODUCES RESULTS
   % THAT CLOSELY MATCH THE PAPER'S
-  % !!!!!!!!!!!!!!!!!!!!
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   k_alpha0 = 5.7654e7;
   % model parameter, pg 161, J/mol
@@ -669,11 +704,10 @@ function [dp_f] = dias_pow_f(T, M, dias)
   end
 end
 
+% returns diastatic power profile based
+% on the drying outputs: air temp, air moisture
+% and their corresponding times
 function [dp_prof] = dias_pow_profile(Tas, Ms, times)
-  % returns diastatic power profile based
-  % on the drying outputs: air temp, air moisture
-  % and their corresponding times
-  % !!!!!!!!!!!!!!!!!!!!
   % uses RK4 for integration
   dias_init=400;
   nsteps = size(times, 2);
@@ -694,11 +728,10 @@ function [dp_prof] = dias_pow_profile(Tas, Ms, times)
   dp_prof = dias_pows;
 end
 
+% returns limit-dextrinase profile based
+% on the drying outputs: air temp, air moisture
+% and their corresponding times
 function [ld_prof] = limit_dextrinase_profile(Tas, Ms, times)
-  % returns limit-dextrinase profile based
-  % on the drying outputs: air temp, air moisture
-  % and their corresponding times
-  % !!!!!!!!!!!!!!!!!!!!
   % uses RK4 for integration
   dex_init=80;
   nsteps = size(times, 2);
@@ -719,9 +752,10 @@ function [ld_prof] = limit_dextrinase_profile(Tas, Ms, times)
   ld_prof = lim_dexts;
 end
 
+% dext_prime, 1/s
+% model parameter, 1/min
+% pg. 161
 function [ld_f] = lim_dext_f(T, M, dext)
-  % dext_prime, 1/s
-  % model parameter, pg 161, 1/min
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   % !!!!!!!!!!!!!!!!!!!!
   %    UNITS of k_dext0??
