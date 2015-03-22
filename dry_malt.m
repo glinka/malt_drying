@@ -26,7 +26,7 @@ function dry_malt()
 			 'Position', [0.2820, 0.1500, 10.4, 1.65],...
 			 'ColumnName', {'z (m)', 'dz (m)', 'dt (s)', 'Initial malt moisture|(kg water/kg dry malt)'},...
 			 'ColumnFormat', {'short', 'short', 'short', 'short'},...
-			 'Data', [0.3, 0.01, 500, 0.8],...
+			 'Data', [0.3, 0.005, 100, 0.8],...
 			 'ColumnEditable', [true, true, true, true],...
 			 'RowName', []);
   % params_table.Position(3:4) = params_table.Extent(3:4);
@@ -240,6 +240,7 @@ function run_malt_model(params, air_prog, plot_opts)
   nts = tfinal/dt;
   % final time, s
   tfinal = nts*dt;
+  times = linspace(0, tfinal, nts+1);
   
   % set up arrays to save:
   % malt temperatures, C
@@ -258,7 +259,6 @@ function run_malt_model(params, air_prog, plot_opts)
   Tms(:, 1) = Tm_init*ones(nzs,1);
   % setting intitial malt moisture content throughout the bed
   Ms(:, 1) = Ms_init*ones(nzs, 1);
-  times = linspace(0, tfinal, nts+1);
 
   % define smaller functions
   % saturated water vapor pressure, Pa
@@ -275,13 +275,16 @@ function run_malt_model(params, air_prog, plot_opts)
   % one would need to water activity
   % !!!!!!!!!!!!!!!!!!!!
   % equilibrium moisture content of barley, kg water/kg dry matter
+  % o'callaghan, 1971, pg. 231
   M_eq = @(Ta,Wa) power(Wa, 0.5)*7040/power(1.8*Ta+32, 2) + 0.06015;
   % change in moisture content of in slice after passage of "dt" time
+  % Bala's thesis, pg. 91
   dM = @(Ta,M,Wa,dt) -k(Ta)*(M-M_eq(Ta, Wa))*dt/(1+k(Ta)*dt/2);
   % change in air moisture content over slice
   % Bala's thesis, pg. 90
   dWa = @(rho,dz,dM,G,dt) -rho*dz*dM/(G*dt);
   % heat transfer coefficient, J/(K s m^3)
+  % o'callaghan, 1971, pg. 232
   h_barley = @(G,Ta) 856800*power(G*(Ta+273)/101325, 0.6);
 
   % begin outer loop, iterating through every timestep
@@ -336,9 +339,10 @@ function run_malt_model(params, air_prog, plot_opts)
 	% we use this 'ddm' value to decrement the initial 'dm' value until we find a new value of 'dm' such that the relative humidity is less than 98%
 	% then we will have bracketed the desired value of 'dm', the one at which the relative humidity is exactly 98%, between the 'dm_init' and 'dm', after which we can perform the bisection method to find it
         dm_init = dm;
-        ddm = dm_init/10.0;
+        ddm = dm_init/1000.0;
         iters = 0;
         while RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) > .98 && iters < BISECTION_MAXITER
+	  dm_init = dm;
           dm = dm - ddm;
           dwa = dWa(rho_barley, dz, dm, G, dt);
           dtm = dTm(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley);
@@ -351,7 +355,20 @@ function run_malt_model(params, air_prog, plot_opts)
 	% set the 'left' and 'right' 'dm' values to begin bisection
         dm_l = dm;
         dm_r = dm_init;
+	dm = dm_l + (dm_l + dm_r)/2.0;
         iters = 0;
+
+%	% TESTING
+%	RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta))
+%        dwa = dWa(rho_barley, dz, dm_init, G, dt);
+%        dtm = dTm(Was(j, i), dwa, dm_init, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley);
+%        dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm_init, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
+%	RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta))
+%	% END TESTING
+%
+        dwa = dWa(rho_barley, dz, dm, G, dt);
+        dtm = dTm(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley);
+        dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
 
 	% now that the desired properties are bracketed, perform a bisection-based search for the conditions at which relative humidity is 98% (up to BISECTION_TOL error)
         while abs(RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - .98) > BISECTION_TOL && iters < BISECTION_MAXITER
@@ -456,6 +473,35 @@ function run_malt_model(params, air_prog, plot_opts)
     plot(ax, (1:(nts+1))*dt/3600.0, mean(Ms, 1), 'DisplayName', 'average', 'Color', 'r', 'Linewidth', 2.0);
     % malt moisture evolution at various depths
     plot_xy_slices(handle, (1:(nts+1))*dt/3600.0, Ms, 'Time (h)', 'Malt moisture content (kg water/kg dry air)', 5, dz)
+  end
+
+  % initial concentration of sugar (M)
+  % **********************************************************************
+  % this value is completely arbitrary at the moment as Jousse's paper doesn't appear to give any guidance on its proper specification
+  % **********************************************************************
+  s_init = 5e-7;
+  % initial concentration of amino acids (M)
+  % **********************************************************************
+  % this value is completely arbitrary at the moment as Jousse's paper doesn't appear to give any guidance on its proper specification
+  % **********************************************************************
+  aa_init = 5e-7;
+  % times vector is one element to long, take only first 'nts'
+  shortened_times = times(1:(length(times)-1))
+  concentration_profiles = maillard_profile(s_init, aa_init, shortened_times, mean(Tas, 1))
+  dims = size(concentration_profiles)
+  nspecies = dims(2)
+  % store species labels
+  labels = {'S', 'AA', 'ARP', 'PY', 'RS', 'FU', 'C', 'I', 'SA', 'PZ'}
+  % each column of concentration_profiles contains the time evolution of a different species: loop over them and plot each
+  for i = 1:nspecies
+      handle = handle + 1
+      fig = figure(handle);
+      ax = gca;
+      plot(ax, shortened_times, concentration_profiles(:,i), 'Color', 'r', 'Linewidth', 2.0);
+      title(ax, ['Concentration of ', labels(i), ' over time'])
+      xlabel('Time (s)')
+      ylabel(ax, ['Concentration of ', labels(i), ' (mol/L)'])
+      figure(handle)
   end
 
 end
@@ -602,15 +648,16 @@ end
 % and their corresponding times
 function [bg_prof] = beta_gluc_profile(Tas, Ms, times)
   % uses RK4 to integrate
+  % hamalainen, 2007, pg 162, Fig 2
   beta_init=700;
   nsteps = size(times, 2);
   beta_glucs = zeros(nsteps-1, 1);
   beta_glucs(1) = beta_init;
   % universal gas constant, J/mol K
   R = 8.3143;
-  % model parameter, pg 161, 1/min
+  % hamalainen, 2007, pg 161, 1/min
   k_beta0 = 3.089e8;
-  % model parameter, pg 161, J/mol
+  % hamalainen, 2007, pg 161, J/mol
   E_beta = 7.248e4;
   k_beta = @(T) k_beta0*exp(-E_beta/(R*T));
   % beta_prime, 1/s
@@ -635,13 +682,14 @@ end
 % and their corresponding times
 function [aa_prof] = alpha_am_profile(Tas, times)
   % uses RK4 for integration
+  % hamalainen, 2007, pg 163, Fig 3
   alpha_init=55;
   nsteps = size(times, 2);
   alpha_ams = zeros(nsteps-1, 1);
   alpha_ams(1) = alpha_init;
   % universal gas constant, J/mol K
   R = 8.3143;
-  % model parameter, pg 161, 1/min
+  % hamalainen, 2007, pg 161, 1/min
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   % UNITS of k_alpha0??
   % PAPER'S VALUE IS 5.7654e9
@@ -651,7 +699,7 @@ function [aa_prof] = alpha_am_profile(Tas, times)
   % THAT CLOSELY MATCH THE PAPER'S
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   k_alpha0 = 5.7654e7;
-  % model parameter, pg 161, J/mol
+  % hamalainen, 2007, pg 161, J/mol
   E_alpha = 7.8913e4;
   k_alpha = @(T) k_alpha0*exp(-E_alpha/(R*T));
   % alpha_prime, 1/s
@@ -676,20 +724,20 @@ end
 % and their corresponding times
 function [dp_f] = dias_pow_f(T, M, dias)
   % dias_prime, 1/s
-  % model parameter, pg 161, 1/min
+  % hamalainen, 2007, pg 161, 1/min
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   % !!!!!!!!!!!!!!!!!!!!
   %    UNITS of k_dias0??
   % !!!!!!!!!!!!!!!!!!!!
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   k_dias0 = 4.8037e10; %e12
-  % model parameter, pg 161, J/mol
+  % hamalainen, 2007, pg 161, J/mol
   E_dias = 9.5056e4;
-  % model parameter, pg 161, units?
+  % hamalainen, 2007, pg 161, units?
   r_dias = 5.0361e-2;
-  % model parameter, pg 161, WK/ 100 g dm
+  % hamalainen, 2007, pg 161, WK/ 100 g dm
   K_dias = 470.0;
-  % model parameter, pg 161, % dry basis
+  % hamalainen, 2007, pg 161, % dry basis
   M_dias = .40;
   % universal gas constant, J/mol K
   R = 8.3143;
@@ -709,6 +757,7 @@ end
 % and their corresponding times
 function [dp_prof] = dias_pow_profile(Tas, Ms, times)
   % uses RK4 for integration
+  % hamalainen, 2007, pg 163, Fig 4
   dias_init=400;
   nsteps = size(times, 2);
   dias_pows = zeros(nsteps-1, 1);
@@ -733,6 +782,7 @@ end
 % and their corresponding times
 function [ld_prof] = limit_dextrinase_profile(Tas, Ms, times)
   % uses RK4 for integration
+  % hamalainen, 2007, pg 164, Fig 5
   dex_init=80;
   nsteps = size(times, 2);
   lim_dexts = zeros(nsteps-1, 1);
@@ -753,7 +803,7 @@ function [ld_prof] = limit_dextrinase_profile(Tas, Ms, times)
 end
 
 % dext_prime, 1/s
-% model parameter, 1/min
+% hamalainen, 2007, 1/min
 % pg. 161
 function [ld_f] = lim_dext_f(T, M, dext)
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -762,13 +812,13 @@ function [ld_f] = lim_dext_f(T, M, dext)
   % !!!!!!!!!!!!!!!!!!!!
   % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   k_dext0 = 1.6554e18; %e20
-  % model parameter, pg 161, J/mol
+  % hamalainen, 2007, pg 161, J/mol
   E_dext = 1.4516e5;
-  % model parameter, pg 161, units?
+  % hamalainen, 2007, pg 161, units?
   r_dext = 6.4693;
-  % model parameter, pg 161, RPU/ 100 g dm
+  % hamalainen, 2007, pg 161, RPU/ 100 g dm
   K_dext = 93.963;
-  % model parameter, pg 161, % dry basis
+  % hamalainen, 2007, pg 161, % dry basis
   M_dext = 0.40;
   % universal gas constant, J/mol K
   R = 8.3143;
@@ -782,3 +832,98 @@ function [ld_f] = lim_dext_f(T, M, dext)
     ld_f = -k_dext(T)*dext/60.0;
   end
 end
+
+% integration of simplified maillard reaction products as described in
+% Jousse, 2002, pg. 2536
+% Args:
+% times: vector of times at which to evaluate the integration (s)
+% *********************************************************************************************************
+% ********** note that t(1) is the considered the initial time and thus should, by default, be 0 **********
+% *********************************************************************************************************
+% s_init: initial concentration of sugar (M)
+% aa_init: initial concentration of amino acid (M)
+% times: times at which bed temp was calculated (s)
+% temp_profile: average bed temperatures at given times (C)
+% *********************************************************************************************************
+% ********** given this definition, the dimensions of temp_profile and times must be equivalent ***********
+% *********************************************************************************************************
+function [concentration_profiles] = maillard_profile(s_init, aa_init, times, temp_profile)
+  % fit temp profile to fifth-order polynomial for use in integration
+  % order is somewhat arbitrary, but produces good agreement with actual data
+  polynomial_order = 9;
+  temp_fit_coeffs = polyfit(times, temp_profile, polynomial_order);
+  
+  % VISUALLY TEST GOODNESS OF FIT
+  f = figure(120398);
+  ax = gca;
+  hold(ax);
+  plot(times, temp_profile, '-b');
+  scatter(times, polyval(temp_fit_coeffs, times), '+r');
+  figure(120398);
+  % END TESTING
+
+  % universal gas constant (kJ/K mol)
+  R = 8.314e-3
+  % define Arrhenius rate constants
+  % from Jousse, 2002, pg. 2537
+  % k values (dimensionless)
+  k1 = 0
+  k2 = 5e12;
+  k3 = 6e1;
+  k4 = 1.5e5;
+  k5 = 2e11;
+  k6 = 5e5;
+  % from pg. 2538, k7 = 0
+  k7 = 0;
+  k8 = 5e11;
+  k9 = 1e15;
+  k10 = 0;
+  k11 = 1e10;
+  % E values (kJ/mol)
+  E1 = 0;
+  E2 = 120.5;
+  E3 = 35.1;
+  E4 = 52.9;
+  E5 = 109.3;
+  E6 = 66.5;
+  E7 = 0;
+  E8 = 83.1;
+  E9 = 116.3;
+  E10 = 0;
+  E11 = 99.7;
+
+  % define nested function that will be used by MATLAB's integrator which has access to necessary rate constants
+  function [rhs] = maillard_f(t, X)
+    % unpack X for clarity
+    S = X(1);
+    AA = X(2);
+    ARP = X(3);
+    PY = X(4);
+    RS = X(5);
+    FU = X(6);
+    C = X(7);
+    I = X(8);
+    SA = X(9);
+    PZ = X(10);
+    % evaluate the bed temperature at the current time from the polynomial fitting (K)
+    avg_bed_temp = polyval(temp_fit_coeffs, t) + 273.15;
+    % evaluate reaction rates based on current average temperature and Arrhenius parameters
+    r = [k1, k2, k3, k4, k5, k6, k7, k8, k9, k10, k11].*exp(-[E1, E2, E3, E4, E5, E6, E7, E8, E9, E10, E11]/(R*avg_bed_temp));
+    % evaluate right side of ode
+    % from Jousse, 2002, pg. 2536
+    dSdt = -r(1)*S - r(2)*S*AA;
+    dAAdt = -r(2)*S*AA + r(4)*ARP - r(8)*C*AA;
+    dARPdt = r(2)*S*AA - r(3)*ARP - r(4)*ARP;
+    dPYdt = r(3)*ARP - r(11)*PY;
+    dRSdt = r(4)*ARP - r(5)*RS - r(6)*RS;
+    dFUdt = r(5)*RS + r(7)*C*C - r(11)*FU;
+    dCdt = 2*r(6)*RS - r(7)*C*C - r(8)*C*AA - r(11)*C;
+    dIdt = r(8)*C*AA - r(9)*I - r(10)*I*I;
+    dSAdt = r(9)*I - r(11)*SA;
+    dPZdt = r(10)*I*I - r(11)*PZ;
+    rhs = [dSdt; dAAdt; dARPdt; dPYdt; dRSdt; dFUdt; dCdt; dIdt; dSAdt; dPZdt];
+  end
+  % use matlab's integrator with initial concentrations of S and AA, zero initial concentration of all other species;
+  [times, concentration_profiles] = ode45(@maillard_f, times, [s_init, aa_init, 0, 0, 0, 0, 0, 0, 0, 0]);
+end
+
