@@ -26,7 +26,7 @@ function dry_malt()
 			 'Position', [0.2820, 0.1500, 10.4, 1.65],...
 			 'ColumnName', {'z (m)', 'dz (m)', 'dt (s)', 'Initial malt moisture|(kg water/kg dry malt)'},...
 			 'ColumnFormat', {'short', 'short', 'short', 'short'},...
-			 'Data', [0.3, 0.005, 100, 0.8],...
+			 'Data', [0.3, 0.01, 500, 0.8],...
 			 'ColumnEditable', [true, true, true, true],...
 			 'RowName', []);
   % params_table.Position(3:4) = params_table.Extent(3:4);
@@ -220,10 +220,10 @@ function run_malt_model(params, air_prog, plot_opts)
   % assumed constant
   % note that pg. 114 suggested using 608.0 instead
   rho_barley = 527.0;
-  % dry barley heat capacity, kJ/(kg K)
+  % dry barley heat capacity, J/(kg K)
   % Bala's thesis, pg. 16
   % assumed constant
-  Cp_barley = 1.651;
+  Cp_barley = 1651;
   % specific heat of water vapor kJ/(kg K)
   % assumed constant, taken at 325 K
   Cp_watervapor = 1.870;
@@ -269,7 +269,8 @@ function run_malt_model(params, air_prog, plot_opts)
   RH = @(Pw,Ps) Pw/Ps;
   % drying rate paramater, 1/s
   % Bala's thesis, pg. 77
-  k = @(Ta) 9.5294e6*exp(-6725.02/(Ta+273.15));
+  k = @(Ta) 9.5294e6*exp(-6725.02/(Ta+273.15))/60.0;
+
   % !!!!!!!!!!!!!!!!!!!!
   % to use the value found in the internal Cargill report: "MOISTURE SORPTION ISOTHERMS FOR GERMINATED BARLEY" by Elizabeth Reid, pg. 16
   % one would need to water activity
@@ -355,20 +356,13 @@ function run_malt_model(params, air_prog, plot_opts)
 	% set the 'left' and 'right' 'dm' values to begin bisection
         dm_l = dm;
         dm_r = dm_init;
+	% start in middle of left and right values
 	dm = dm_l + (dm_l + dm_r)/2.0;
-        iters = 0;
-
-%	% TESTING
-%	RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta))
-%        dwa = dWa(rho_barley, dz, dm_init, G, dt);
-%        dtm = dTm(Was(j, i), dwa, dm_init, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley);
-%        dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm_init, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
-%	RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta))
-%	% END TESTING
-%
+	% update values
         dwa = dWa(rho_barley, dz, dm, G, dt);
         dtm = dTm(Was(j, i), dwa, dm, Tas(j, i), Cp_barley, Ms(j, i), Cp_water, Cp_watervapor, dz, rho_barley, G, dt, h_barley(G, Tas(j, i)), Tms(j, i), rho_barley);
         dta = dTa(Tms(j, i), dtm, rho_barley, h_barley(G, Tas(j, i)), dt, dm, Cp_barley, Cp_water, Ms(j, i), Cp_watervapor, Tas(j, i), G, Was(j,i), dz);
+        iters = 0;
 
 	% now that the desired properties are bracketed, perform a bisection-based search for the conditions at which relative humidity is 98% (up to BISECTION_TOL error)
         while abs(RH(Pw(Was(j,i) + dwa), Ps(Tas(j,i) + dta)) - .98) > BISECTION_TOL && iters < BISECTION_MAXITER
@@ -486,22 +480,22 @@ function run_malt_model(params, air_prog, plot_opts)
   % **********************************************************************
   aa_init = 5e-7;
   % times vector is one element to long, take only first 'nts'
-  shortened_times = times(1:(length(times)-1))
-  concentration_profiles = maillard_profile(s_init, aa_init, shortened_times, mean(Tas, 1))
-  dims = size(concentration_profiles)
-  nspecies = dims(2)
+  shortened_times = times(1:(length(times)-1));
+  concentration_profiles = maillard_profile(s_init, aa_init, shortened_times, mean(Tas, 1));
+  dims = size(concentration_profiles);
+  nspecies = dims(2);
   % store species labels
-  labels = {'S', 'AA', 'ARP', 'PY', 'RS', 'FU', 'C', 'I', 'SA', 'PZ'}
+  labels = {'S', 'AA', 'ARP', 'PY', 'RS', 'FU', 'C', 'I', 'SA', 'PZ'};
   % each column of concentration_profiles contains the time evolution of a different species: loop over them and plot each
   for i = 1:nspecies
-      handle = handle + 1
+      handle = handle + 1;
       fig = figure(handle);
       ax = gca;
       plot(ax, shortened_times, concentration_profiles(:,i), 'Color', 'r', 'Linewidth', 2.0);
-      title(ax, ['Concentration of ', labels(i), ' over time'])
-      xlabel('Time (s)')
-      ylabel(ax, ['Concentration of ', labels(i), ' (mol/L)'])
-      figure(handle)
+      title(ax, ['Concentration of ', labels(i), ' over time']);
+      xlabel('Time (s)');
+      ylabel(ax, ['Concentration of ', labels(i), ' (mol/L)']);
+      figure(handle);
   end
 
 end
@@ -849,25 +843,16 @@ end
 % *********************************************************************************************************
 function [concentration_profiles] = maillard_profile(s_init, aa_init, times, temp_profile)
   % fit temp profile to fifth-order polynomial for use in integration
-  % order is somewhat arbitrary, but produces good agreement with actual data
-  polynomial_order = 9;
+  % order is somewhat arbitrary, but produces reasonable agreement with actual data
+  polynomial_order = 5;
   temp_fit_coeffs = polyfit(times, temp_profile, polynomial_order);
-  
-  % VISUALLY TEST GOODNESS OF FIT
-  f = figure(120398);
-  ax = gca;
-  hold(ax);
-  plot(times, temp_profile, '-b');
-  scatter(times, polyval(temp_fit_coeffs, times), '+r');
-  figure(120398);
-  % END TESTING
 
   % universal gas constant (kJ/K mol)
-  R = 8.314e-3
+  R = 8.314e-3;
   % define Arrhenius rate constants
   % from Jousse, 2002, pg. 2537
   % k values (dimensionless)
-  k1 = 0
+  k1 = 0;
   k2 = 5e12;
   k3 = 6e1;
   k4 = 1.5e5;
@@ -926,4 +911,3 @@ function [concentration_profiles] = maillard_profile(s_init, aa_init, times, tem
   % use matlab's integrator with initial concentrations of S and AA, zero initial concentration of all other species;
   [times, concentration_profiles] = ode45(@maillard_f, times, [s_init, aa_init, 0, 0, 0, 0, 0, 0, 0, 0]);
 end
-
